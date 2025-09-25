@@ -1,0 +1,16 @@
+# Extracción y procesamiento de texto
+pypdf
+pdfminer.six
+pandas
+pyarrow
+tqdm
+numpy
+
+# Embeddings locales
+sentence-transformers
+
+# Indexación vectorial
+faiss-cpu   # usa faiss-gpu si tienes GPU
+
+# Utilidades
+python-dotenv
