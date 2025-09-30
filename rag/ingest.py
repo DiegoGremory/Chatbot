@@ -1,110 +1,100 @@
 import os
-from pathlib import Path
-from typing import List
+import re
 import pandas as pd
 from pypdf import PdfReader
-import re
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+import logging
 
-RAW_DIR = Path("data/raw")
-PROCESSED_DIR = Path("data/processed")
-OUTPUT_FILE = PROCESSED_DIR / "chunks.parquet"
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# ---------------------
-# Funciones de utilidad
-# ---------------------
 def clean_text(text: str) -> str:
-    """Limpia encabezados/pies de página y normaliza saltos de línea."""
-    text = re.sub(r'\n+', '\n', text)
-    text = re.sub(r'[ \t]+', ' ', text)
-    text = re.sub(r'\n\d+\n', '\n', text)  # eliminar números de página simples
+    text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
-def chunk_text(text: str, chunk_size: int = 900, overlap: int = 120) -> List[str]:
-    """Divide el texto en chunks aproximados de palabras."""
-    words = text.split()
-    chunks = []
-    start = 0
-    while start < len(words):
-        end = start + chunk_size
-        chunk = " ".join(words[start:end])
-        chunks.append(chunk)
-        start += chunk_size - overlap
-    return chunks
+def extract_text_from_pdf(file_path: str) -> list[tuple[int, str]]:
+    """
+    Extrae texto de un PDF y lo devuelve como una lista de tuplas (page_number, text).
+    """
+    logging.info(f"Extrayendo texto de PDF: {os.path.basename(file_path)}")
+    try:
+        reader = PdfReader(file_path)
+        pages_content = []
+        for i, page in enumerate(reader.pages):
+            page_text = page.extract_text()
+            if page_text:
+                # Guardamos el número de página (i+1) y su texto
+                pages_content.append((i + 1, page_text))
+        return pages_content
+    except Exception as e:
+        logging.error(f"No se pudo leer el PDF {file_path}: {e}")
+        return []
 
-# ---------------------
-# Ingesta PDF
-# ---------------------
-def ingest_pdf(file_path: Path, doc_id: str = None) -> pd.DataFrame:
-    doc_id = doc_id or file_path.stem
-    reader = PdfReader(file_path)
-    
+def extract_text_from_txt(file_path: str) -> list[tuple[int, str]]:
+    """
+    Extrae texto de un TXT y lo devuelve en el mismo formato que el PDF.
+    """
+    logging.info(f"Extrayendo texto de TXT: {os.path.basename(file_path)}")
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            # Para un txt, asignamos todo a la página 1
+            return [(1, f.read())]
+    except Exception as e:
+        logging.error(f"No se pudo leer el TXT {file_path}: {e}")
+        return []
+
+def ingest_data(raw_data_path: str) -> list[dict]:
     all_chunks = []
-    for i, page in enumerate(reader.pages, start=1):
-        raw_text = page.extract_text() or ""
-        text = clean_text(raw_text)
-        chunks = chunk_text(text)
-        for chunk in chunks:
-            all_chunks.append({
-                "doc_id": doc_id,
-                "title": file_path.stem,
-                "page": i,
-                "text": chunk
-            })
-    return pd.DataFrame(all_chunks)
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=150,
+        separators=["\n\n", "\n", ". ", " ", ""],
+        length_function=len
+    )
+    file_names = [f for f in os.listdir(raw_data_path) if os.path.isfile(os.path.join(raw_data_path, f))]
 
-# ---------------------
-# Ingesta TXT
-# ---------------------
-def ingest_txt(file_path: Path, doc_id: str = None) -> pd.DataFrame:
-    doc_id = doc_id or file_path.stem
-    with open(file_path, "r", encoding="utf-8") as f:
-        raw_text = f.read()
-    text = clean_text(raw_text)
-    chunks = chunk_text(text)
-    all_chunks = [{
-        "doc_id": doc_id,
-        "title": file_path.stem,
-        "page": 1,
-        "text": chunk
-    } for chunk in chunks]
-    return pd.DataFrame(all_chunks)
-
-# ---------------------
-# Guardado
-# ---------------------
-def save_chunks(df: pd.DataFrame, out_path: Path):
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(out_path, index=False)
-    print(f"[INFO] Chunks guardados en {out_path}")
-
-# ---------------------
-# Ingesta completa de raw
-# ---------------------
-def ingest_all_raw(raw_dir: Path = RAW_DIR) -> pd.DataFrame:
-    all_dfs = []
-    files = list(raw_dir.glob("*.pdf")) + list(raw_dir.glob("*.txt"))
-    if not files:
-        print("[WARN] No se encontraron archivos PDF o TXT en data/raw")
-        return pd.DataFrame()
-    
-    for file in files:
-        ext = file.suffix.lower()
-        print(f"[INFO] Procesando {file.name}")
-        if ext == ".pdf":
-            df = ingest_pdf(file)
-        elif ext == ".txt":
-            df = ingest_txt(file)
+    for file_name in file_names:
+        file_path = os.path.join(raw_data_path, file_name)
+        doc_id, extension = os.path.splitext(file_name)
+        
+        pages_content = []
+        if extension.lower() == '.pdf':
+            pages_content = extract_text_from_pdf(file_path)
+        elif extension.lower() == '.txt':
+            pages_content = extract_text_from_txt(file_path)
         else:
-            print(f"[WARN] Extensión no soportada: {ext}")
             continue
-        all_dfs.append(df)
-    return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+            
+        if not pages_content:
+            continue
 
-# ---------------------
-# CLI rápido
-# ---------------------
-if __name__ == "__main__":
-    df_chunks = ingest_all_raw()
-    if not df_chunks.empty:
-        save_chunks(df_chunks, OUTPUT_FILE)
+        for page_num, page_text in pages_content:
+            cleaned_text = clean_text(page_text)
+            chunks = text_splitter.split_text(cleaned_text)
+            
+            for i, chunk_text in enumerate(chunks):
+                all_chunks.append({
+                    "doc_id": doc_id,
+                    "title": doc_id.replace('_', ' ').replace('-', ' '),
+                    "page": page_num, # ¡AQUÍ ESTÁ LA MAGIA!
+                    "chunk_id": f"{doc_id}-{page_num}-{i}",
+                    "text": chunk_text
+                })
+    return all_chunks
 
+def main():
+    logging.info("--- Iniciando el proceso de ingesta de datos ---")
+    RAW_DATA_PATH = 'data/raw'
+    PROCESSED_DATA_PATH = 'data/processed'
+    OUTPUT_FILE = os.path.join(PROCESSED_DATA_PATH, 'chunks.parquet')
+    os.makedirs(PROCESSED_DATA_PATH, exist_ok=True)
+    chunks = ingest_data(RAW_DATA_PATH)
+    if not chunks:
+        logging.error("No se generaron chunks. Finalizando.")
+        return
+    df = pd.DataFrame(chunks)
+    df.to_parquet(OUTPUT_FILE)
+    logging.info(f"--- Proceso de ingesta finalizado ---")
+    logging.info(f"Se guardaron {len(df)} chunks en: {OUTPUT_FILE}")
+
+if __name__ == '__main__':
+    main()
