@@ -1,16 +1,17 @@
-# Extracción y procesamiento de texto
+# --- Core RAG Pipeline ---
+langchain
+openai
+
+# --- Extracción y Procesamiento de Datos ---
 pypdf
-pdfminer.six
 pandas
 pyarrow
-tqdm
-numpy
 
-# Embeddings locales
+# --- Embeddings y Búsqueda Vectorial ---
 sentence-transformers
+faiss-cpu # usa faiss-gpu si tienes una GPU configurada
 
-# Indexación vectorial
-faiss-cpu   # usa faiss-gpu si tienes GPU
-
-# Utilidades
+# --- Utilidades ---
 python-dotenv
+numpy
+tqdm
