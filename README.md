@@ -27,10 +27,6 @@ git clone https://github.com/DiegoGremory/Chatbot.git
 ```
 cd Chatbot
 ```
-```
-cd ufro-assistant
-
-```
 Configurar variables de entorno (.env):
 
 ```
