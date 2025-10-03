@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UFRO Assistant</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f9; margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        #chat-window { width: 90%; max-width: 800px; height: 90vh; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
+        #chat-header { background-color: #007A3D; color: white; padding: 16px; border-top-left-radius: 12px; border-top-right-radius: 12px; text-align: center; }
+        #chat-header h1 { margin: 0; font-size: 1.5em; }
+        #provider-selector { margin-top: 10px; font-size: 0.9em; color: #e0e0e0; }
+        #provider-selector select { border-radius: 5px; border: 1px solid #ccc; padding: 3px 6px; background-color: #f4f4f9; color: #333; }
+        #chat-messages { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        .message { padding: 10px 15px; border-radius: 20px; max-width: 75%; line-height: 1.5; word-wrap: break-word; }
+        .user-message { background-color: #007A3D; color: white; align-self: flex-end; border-bottom-right-radius: 5px; }
+        .bot-message { background-color: #e9e9eb; color: #333; align-self: flex-start; border-bottom-left-radius: 5px; }
+        .bot-message .sources { margin-top: 12px; font-size: 0.8em; color: #555; border-top: 1px solid #ddd; padding-top: 10px; }
+        .bot-message .sources strong { color: #333; }
+        .bot-message .sources ul { margin: 5px 0 0 0; padding-left: 20px; }
+        #chat-form { border-top: 1px solid #ddd; padding: 15px; display: flex; gap: 10px; }
+        #chat-form input { flex-grow: 1; border: 1px solid #ccc; border-radius: 20px; padding: 10px 15px; font-size: 1em; }
+        #chat-form button { background-color: #007A3D; color: white; border: none; border-radius: 20px; padding: 10px 20px; cursor: pointer; font-size: 1em; font-weight: bold; }
+        #chat-form button:hover { background-color: #005c2e; }
+        .loader { align-self: flex-start; }
+    </style>
+</head>
+<body>
+    <div id="chat-window">
+        <div id="chat-header">
+            <h1>🎓 UFRO Assistant</h1>
+            <div id="provider-selector">
+                <label for="provider">Motor de IA:</label>
+                <select id="provider">
+                    <option value="deepseek" selected>DeepSeek</option>
+                    <option value="chatgpt">ChatGPT</option>
+                </select>
+            </div>
+        </div>
+        <div id="chat-messages">
+            <div class="message bot-message">Hola 👋, soy el asistente académico de la UFRO. ¿En qué puedo ayudarte hoy?</div>
+        </div>
+        <form id="chat-form">
+            <input type="text" id="message-input" placeholder="Escribe tu pregunta aquí..." autocomplete="off" required>
+            <button type="submit">Enviar</button>
+        </form>
+    </div>
+
+    <script>
+        const form = document.getElementById('chat-form');
+        const input = document.getElementById('message-input');
+        const messagesContainer = document.getElementById('chat-messages');
+        const providerSelect = document.getElementById('provider');
+
+        form.addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const userInput = input.value.trim();
+            if (!userInput) return;
+
+            // 1. Mostrar el mensaje del usuario y limpiar el input
+            appendMessage(userInput, 'user-message');
+            input.value = '';
+            
+            // 2. Mostrar un indicador de carga
+            const loader = appendMessage('...', 'bot-message', true);
+
+            // 3. Enviar la pregunta y el proveedor al backend (endpoint raíz "/")
+            try {
+                const response = await fetch('/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        message: userInput,
+                        provider: providerSelect.value 
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `Error del servidor: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                // 4. Reemplazar el loader con la respuesta real
+                updateBotMessage(loader, data.answer, data.sources);
+
+            } catch (error) {
+                console.error("Error al contactar al servidor:", error);
+                updateBotMessage(loader, "Lo siento, ocurrió un error al procesar tu pregunta.", []);
+            }
+        });
+
+        function appendMessage(text, className, isLoader = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${className}`;
+            if (isLoader) {
+                messageDiv.innerHTML = '<div class="loader">● ● ●</div>';
+            } else {
+                messageDiv.appendChild(document.createTextNode(text));
+            }
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            return messageDiv;
+        }
+
+        function updateBotMessage(messageDiv, answer, sources) {
+            messageDiv.innerHTML = '';
+            messageDiv.appendChild(document.createTextNode(answer || "No se recibió respuesta."));
+
+            if (sources && sources.length > 0) {
+                const sourcesDiv = document.createElement('div');
+                sourcesDiv.className = 'sources';
+                
+                const strong = document.createElement('strong');
+                strong.textContent = 'Fuentes:';
+                sourcesDiv.appendChild(strong);
+                
+                const ul = document.createElement('ul');
+                sources.forEach(src => {
+                    const li = document.createElement('li');
+                    li.textContent = src;  // Ej: "doc123 (p. 4)" → ya lo devuelve el backend
+                    ul.appendChild(li);
+                });
+                
+                sourcesDiv.appendChild(ul);
+                messageDiv.appendChild(sourcesDiv);
+            }
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    </script>
+</body>
+</html>
