@@ -15,3 +15,5 @@ faiss-cpu # usa faiss-gpu si tienes una GPU configurada
 python-dotenv
 numpy
 tqdm
+
+flask
